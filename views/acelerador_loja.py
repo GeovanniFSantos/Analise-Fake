@@ -153,6 +153,6 @@ def show_acelerador(store_name):
     # 2. MOSTRA HISTÓRICO (Dentro do Dropdown)
     if not df_finalizadas.empty:
         st.markdown("---")
-        with st.expander("📜 Histórico de Campanhas Encerradas", expanded=False):
+        with st.expander("📜 Histórico de Campanhas Encerradas", expanded=True):
             for _, row in df_finalizadas.iterrows():
                 renderizar_cartao_campanha(row, df_global, store_name)

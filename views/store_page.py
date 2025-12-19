@@ -217,8 +217,8 @@ def show_store_dashboard(df_global, store_name):
         'Total Segmento': [pedidos_segmento, valor_medio_segmento, novos_clientes_segmento, pontos_segmento, ''],
         'Total Gabriel Pro': [pedidos_gabriel, valor_medio_gabriel, novos_clientes_gabriel, pontos_gabriel, ''],
         '% Loja/Segmento': [
-            formatar_evolucao_texto(pc_ped), formatar_evolucao_texto(pc_vm), 
-            formatar_evolucao_texto(pc_cli), formatar_evolucao_texto(pc_pts), ''
+            f"{pc_ped:.1%}", f"{pc_vm:.1%}",
+            f"{pc_cli:.1%}", f"{pc_pts:.1%}", ''
         ]
     }
     
@@ -244,7 +244,7 @@ def show_store_dashboard(df_global, store_name):
     # =======================================================================
     # ITEM 2: TABELA COMPARATIVA DE CATEGORIAS
     # =======================================================================
-    st.subheader("2. Comparativo de Profissionais por Categoria (Loja vs Segmento vs Gabriel Pro)")
+    st.subheader("2. Comparativo de Profissionais por Categoria (Loja vs Segmento vs Associação Casa Avant)")
     
     temporada_selecionada_item2 = st.selectbox(
         "Selecione a Temporada de Análise (Item 2):",
@@ -321,7 +321,7 @@ def show_store_dashboard(df_global, store_name):
     def style_participacao_row(val):
         if val.name == df_categorias_comparativo.index[-1]:
             return ['font-weight: bold;'] * len(val)
-        return ['color: #d1d1d1; font-weight: bold'] * len(val)
+        return ['color: #333333; font-weight: bold'] * len(val)
             
     def style_nome_categoria_col(val):
         return CORES_CATEGORIA_TEXTO.get(val, '')
@@ -441,13 +441,15 @@ def show_store_dashboard(df_global, store_name):
     st.markdown("---")
 
     # =======================================================================
-    # ITEM 4: VALOR MÉDIO
+    # =======================================================================
+    # ITEM 4: VALOR MÉDIO (CORRIGIDO ORDEM 7, 8, 9, 10)
     # =======================================================================
     st.subheader("4. Valor Médio de Pedido por Mês e Temporada (Filtrado por Loja/Segmento)")
     
     if 'Mês_Exibicao' in df_filtrado_base.columns and 'Temporada_Exibicao' in df_filtrado_base.columns and temporadas_selecionadas_exib:
         df_base_vm = df_filtrado_base.copy()
         
+        # Agrupamento para os KPIs (Totais por Temporada)
         df_agrupado_total_temp = df_base_vm.groupby('Temporada_Exibicao').agg(
             Pontos_Total=('Pontos', 'sum'),
             Pedidos_Unicos=(COLUNA_PEDIDO, 'nunique')
@@ -458,6 +460,7 @@ def show_store_dashboard(df_global, store_name):
             df_agrupado_total_temp['Pontos_Total'] / df_agrupado_total_temp['Pedidos_Unicos'], 0
         )
         
+        # Agrupamento para a Tabela (Mês x Temporada)
         df_agrupado_filtrado = df_base_vm.groupby(['Mês_Exibicao', 'Temporada_Exibicao']).agg(
             Pontos_Total=('Pontos', 'sum'),
             Pedidos_Unicos=(COLUNA_PEDIDO, 'nunique')
@@ -468,48 +471,72 @@ def show_store_dashboard(df_global, store_name):
             df_agrupado_filtrado['Pontos_Total'] / df_agrupado_filtrado['Pedidos_Unicos'], 0
         )
         
+        # Criação da Pivot Table
         df_pivot_mensal_final = df_agrupado_filtrado.pivot_table(
             index='Mês_Exibicao', columns='Temporada_Exibicao', values='Valor_Medio_Filtrado', fill_value=0
         ).reset_index()
         
+        # Filtra apenas meses selecionados
         df_pivot_mensal_final = df_pivot_mensal_final[df_pivot_mensal_final['Mês_Exibicao'].isin(meses_selecionados_exib)].copy()
         
-        colunas_temporada_vm_sorted_num = sorted([
+        # --- CORREÇÃO DE ORDENAÇÃO AQUI ---
+        
+        # 1. Identifica as colunas de temporada presentes e remove as não selecionadas
+        cols_presentes = [c for c in df_pivot_mensal_final.columns if c.startswith('Temporada')]
+        cols_para_dropar = [c for c in cols_presentes if c not in temporadas_selecionadas_exib]
+        df_pivot_mensal_final.drop(columns=cols_para_dropar, inplace=True, errors='ignore')
+        
+        # 2. Cria uma lista ordenada NUMERICAMENTE das temporadas restantes (ex: Temporada 7, Temporada 8...)
+        colunas_originais_ordenadas = sorted([
             col for col in df_pivot_mensal_final.columns if col.startswith('Temporada') and col != 'Temporada 0'
-        ], key=lambda x: int(x.split(' ')[1]))
+        ], key=lambda x: int(x.split(' ')[1])) # Ordena pelo número após o espaço
 
-        colunas_para_dropar = [col for col in colunas_temporada_vm_sorted_num if col not in temporadas_selecionadas_exib]
-        df_pivot_mensal_final.drop(columns=colunas_para_dropar, inplace=True, errors='ignore')
+        # 3. Prepara os novos nomes e mapas seguindo a ordem estrita da lista acima
+        rename_map = {'Mês_Exibicao': 'Mês'}
+        colunas_display_vm = []   # Vai guardar: ['Médio Por Pedido T7', 'Médio Por Pedido T8'...]
+        colunas_kpi_originais = [] # Vai guardar: ['Temporada 7', 'Temporada 8'...] para buscar o valor do KPI
+
+        for col in colunas_originais_ordenadas:
+            novo_nome = f"Médio Por Pedido {col.replace('Temporada ', 'T')}"
+            rename_map[col] = novo_nome
+            colunas_display_vm.append(novo_nome)
+            colunas_kpi_originais.append(col)
         
-        colunas_display_vm = []
-        colunas_temporada_vm_selecionadas = []
-        for col in df_pivot_mensal_final.columns:
-            if col.startswith('Temporada'):
-                novo_nome = f"Médio Por Pedido {col.replace('Temporada ', 'T')}"
-                df_pivot_mensal_final.rename(columns={col: novo_nome}, inplace=True)
-                colunas_display_vm.append(novo_nome)
-                colunas_temporada_vm_selecionadas.append(col)
-            elif col == 'Mês_Exibicao':
-                df_pivot_mensal_final.rename(columns={col: 'Mês'}, inplace=True)
+        # 4. Aplica a renomeação
+        df_pivot_mensal_final.rename(columns=rename_map, inplace=True)
         
+        # 5. Ordena as linhas por Mês Fiscal
         df_pivot_mensal_final['Ordem'] = df_pivot_mensal_final['Mês'].map(MES_ORDEM_FISCAL)
         df_pivot_mensal_final.sort_values(by='Ordem', inplace=True)
         df_pivot_mensal_final.drop('Ordem', axis=1, inplace=True)
         
+        # --- EXIBIÇÃO ---
+        
         st.markdown("##### Valor Médio Total das Vendas por Pedido (Temporada)")
-        num_cols_kpi_vm = max(1, len(colunas_temporada_vm_selecionadas))
+        
+        # KPIs no topo (Usando a lista ordenada colunas_kpi_originais)
+        num_cols_kpi_vm = max(1, len(colunas_kpi_originais))
         cols_kpi_vm = st.columns(num_cols_kpi_vm)
         
-        if colunas_temporada_vm_selecionadas: 
-            for i, t_col in enumerate(colunas_temporada_vm_selecionadas):
-                vm_valor_series = df_agrupado_total_temp.loc[df_agrupado_total_temp['Temporada_Exibicao'] == t_col, 'Valor_Medio_Total']
+        if colunas_kpi_originais: 
+            for i, t_col_original in enumerate(colunas_kpi_originais):
+                # Busca o valor total usando o nome original ("Temporada X")
+                vm_valor_series = df_agrupado_total_temp.loc[df_agrupado_total_temp['Temporada_Exibicao'] == t_col_original, 'Valor_Medio_Total']
                 vm_valor = vm_valor_series.iloc[0] if not vm_valor_series.empty else 0
+                
+                # Exibe usando o nome curto
+                nome_kpi = t_col_original.replace('Temporada ', 'T')
                 with cols_kpi_vm[i]:
-                    st.metric(f"Valor Médio {t_col.replace('Temporada ', 'T')}", formatar_milhar_br(vm_valor))
+                    st.metric(f"Valor Médio {nome_kpi}", formatar_milhar_br(vm_valor))
         
+        # Tabela (Reordenando as colunas explicitamente)
         df_pivot_mensal_final.set_index('Mês', inplace=True)
+        
+        # Garante que as colunas apareçam na ordem 7, 8, 9, 10
+        df_final_display = df_pivot_mensal_final[colunas_display_vm]
+        
         st.dataframe(
-            df_pivot_mensal_final.style.format({col: lambda x: formatar_milhar_br(x) for col in colunas_display_vm})
+            df_final_display.style.format({col: lambda x: formatar_milhar_br(x) for col in colunas_display_vm})
                 .set_properties(**{'border': '1px solid #333333', 'text-align': 'center'}, subset=pd.IndexSlice[:, colunas_display_vm]),
             use_container_width=True
         )
@@ -733,21 +760,73 @@ def show_store_dashboard(df_global, store_name):
         pts = df_novos_base.loc[df_novos_base['Temporada_Exibicao'] == t, 'Pontos'].sum() if visible else 0
         with cols_kpi_p[i]: st.metric(f"Pts Novos {t}", formatar_milhar_br(pts))
             
-    st.markdown("##### 8 A. Contagem Novos")
+    st.markdown("##### 8 A. Contagem Novos Cadastrados Comprando por Mês")
     if 'Mês_Exibicao' in df_novos_base.columns:
-        df_pivot_novos_full = df_novos_base.pivot_table(index='Mês_Exibicao', columns='Temporada_Exibicao', values='Novo_Cadastrado', aggfunc='sum', fill_value=0).reset_index()
+        # Cria a Pivot Table
+        df_pivot_novos_full = df_novos_base.pivot_table(
+            index='Mês_Exibicao', columns='Temporada_Exibicao', values='Novo_Cadastrado', aggfunc='sum', fill_value=0
+        ).reset_index()
+        
+        # Filtra meses selecionados
         df_pivot_novos = df_pivot_novos_full[df_pivot_novos_full['Mês_Exibicao'].isin(meses_selecionados_exib)].copy()
         
-        # Ordenação Mês
+        # Ordenação por Mês Fiscal
         df_pivot_novos['Ordem'] = df_pivot_novos['Mês_Exibicao'].map(MES_ORDEM_FISCAL)
         df_pivot_novos.sort_values(by='Ordem', inplace=True)
         df_pivot_novos.drop('Ordem', axis=1, inplace=True)
         df_pivot_novos.set_index('Mês_Exibicao', inplace=True)
         
-        # Filtra colunas
+        # Definição das colunas a exibir (Temporadas)
         cols_to_show = [c for c in cols_temp_str if (temporada_novos == 'Todas' or c == temporada_novos)]
+        
+        # --- LÓGICA DA EVOLUÇÃO (STATUS) ---
+        # Verifica se temos pelo menos 2 temporadas para comparar (ex: T9 e T10)
+        col_evolucao = None
+        
+        if len(cols_temp_str) >= 2:
+            t_atual_nome = cols_temp_str[-1] # Ex: Temporada 10
+            t_ant_nome = cols_temp_str[-2]   # Ex: Temporada 9
+            
+            # Nome curto para a coluna (ex: Evolução Clientes (T10 vs T9))
+            col_evolucao = f"Evolução Clientes ({t_atual_nome.replace('Temporada ', 'T')} vs {t_ant_nome.replace('Temporada ', 'T')})"
+            
+            def calcular_status_texto(row):
+                # Garante que pega 0 se não existir valor naquele mês
+                v_atual = row.get(t_atual_nome, 0)
+                v_ant = row.get(t_ant_nome, 0)
+                
+                if v_atual > v_ant:
+                    return "Evolução Positiva"
+                elif v_atual < v_ant:
+                    return "Evolução Negativa"
+                else:
+                    return "Evolução Estável"
+
+            # Aplica a lógica linha a linha
+            df_pivot_novos[col_evolucao] = df_pivot_novos.apply(calcular_status_texto, axis=1)
+            
+            # Adiciona a coluna de evolução na lista de exibição
+            cols_to_show.append(col_evolucao)
+
+        # --- EXIBIÇÃO COM CORES ---
         if cols_to_show:
-            st.dataframe(df_pivot_novos[cols_to_show], use_container_width=True)
+            # Função de estilo para colorir o texto
+            def style_status_evolucao(val):
+                if val == "Evolução Positiva":
+                    return 'color: #00FF00; font-weight: bold' # Verde
+                elif val == "Evolução Negativa":
+                    return 'color: #FF0000; font-weight: bold' # Vermelho
+                elif val == "Evolução Estável":
+                    return 'color: #00009C; font-weight: bold' # Azul Escuro
+                return ''
+
+            st_df = df_pivot_novos[cols_to_show].style.set_properties(**{'text-align': 'center'})
+            
+            # Se a coluna de evolução existir, aplica o mapa de cores nela
+            if col_evolucao:
+                st_df = st_df.applymap(style_status_evolucao, subset=[col_evolucao])
+            
+            st.dataframe(st_df, use_container_width=True)
 
     st.markdown("##### 8 B. Lista Detalhada")
     df_nomes_novos = df_novos_filtrados.groupby([COLUNA_ESPECIFICADOR, 'CNPJ_CPF_LIMPO']).agg(
@@ -763,12 +842,15 @@ def show_store_dashboard(df_global, store_name):
     st.dataframe(df_nomes_novos, use_container_width=True)
 
     # =======================================================================
-    # ITEM 9: ATIVOS / INATIVOS
+# =======================================================================
+    # ITEM 9: ATIVOS / INATIVOS (CORRIGIDO PARA IGNORAR FILTRO LATERAL NO DETALHE)
     # =======================================================================
     st.markdown("---")
     st.subheader("9. Clientes Ativos vs Inativos")
     
+    # 1. Tabela Resumo (Item 9A)
     # IMPORTANTE: Passamos [store_name] fixo como lista
+    # Esta função já calcula corretamente olhando o global, então não mudamos
     df_anual, clientes_hist = calcular_clientes_ativos_inativos(df_global, lojas_selecionadas, segmentos_selecionados)
     
     col_cfg = {
@@ -776,11 +858,13 @@ def show_store_dashboard(df_global, store_name):
         'Contagem de Clientes Não Pontuando (Inativos)': st.column_config.Column("Inativos", help="Clique para filtrar")
     }
     
+    # Renderiza a tabela e captura a seleção
     evento = st.dataframe(
         df_anual.style.format(precision=0).set_properties(**{'border': '1px solid #333'}),
         column_config=col_cfg, use_container_width=True, selection_mode="single-row", on_select="rerun"
     )
     
+    # Botões de Ação baseados na seleção da tabela
     if evento.selection['rows']:
         idx = evento.selection['rows'][0]
         row = df_anual.iloc[idx]
@@ -792,37 +876,86 @@ def show_store_dashboard(df_global, store_name):
             if st.button(f"Ver INATIVOS {row['Temporada']}"): sel = 'inativo'
         
         if sel:
+            # Salva na sessão qual temporada e status queremos ver
             st.session_state['filtro_status_ano'] = {'temporada': row['Temporada'], 'status': sel, 'termo_pesquisa': sel.upper()}
             st.rerun()
 
+    # 2. Lista Detalhada (Item 9B)
     st.markdown("##### 9 B. Detalhe Ativos/Inativos")
-    clientes_ativos_periodo = set(df_filtrado_base['CNPJ_CPF_LIMPO'].unique())
-    clientes_inativos = clientes_hist.difference(clientes_ativos_periodo)
     
-    df_ativos = df_filtrado_base.groupby([COLUNA_ESPECIFICADOR, 'CNPJ_CPF_LIMPO']).agg(Qtd=(COLUNA_PEDIDO, 'nunique'), Data=('Data da Venda', 'max')).reset_index()
-    df_ativos['Status'] = 'ATIVO'
-    
-    df_hist_rel = df_global[(df_global['Loja'].isin(lojas_selecionadas)) & (df_global['Segmento'].isin(segmentos_selecionados))]
-    df_inativos_base = df_hist_rel[df_hist_rel['CNPJ_CPF_LIMPO'].isin(clientes_inativos)].copy()
-    df_inativos = df_inativos_base.groupby([COLUNA_ESPECIFICADOR, 'CNPJ_CPF_LIMPO']).agg(Data=('Data da Venda', 'max')).reset_index()
-    df_inativos['Qtd'] = 0
-    df_inativos['Status'] = 'INATIVO'
-    
-    df_detalhe = pd.concat([df_ativos, df_inativos], ignore_index=True)
-    df_detalhe.sort_values(by=['Status', 'Qtd'], ascending=[False, False], inplace=True)
-    
-    termo_atv = st.text_input("Pesquisar Detalhe:", value=st.session_state['filtro_status_ano']['termo_pesquisa'])
-    # Limpa a session após usar o valor inicial
-    st.session_state['filtro_status_ano']['termo_pesquisa'] = ''
-    
-    if termo_atv:
-        t = termo_atv.lower()
-        df_detalhe = df_detalhe[df_detalhe[COLUNA_ESPECIFICADOR].astype(str).str.lower().str.contains(t) | df_detalhe['Status'].astype(str).str.lower().str.contains(t)]
+    # Recupera o que foi clicado (ex: "Temporada 10" e "inativo")
+    foco_temporada = st.session_state['filtro_status_ano'].get('temporada')
+    foco_status = st.session_state['filtro_status_ano'].get('status') 
 
-    df_detalhe['Data'] = df_detalhe['Data'].apply(lambda x: x.strftime('%d/%m/%Y') if pd.notna(x) else '-')
-    
-    def style_st(row): return ['color: #00FF00' if row['Status']=='ATIVO' else 'color: #FF0000'] * len(row)
-    st.dataframe(df_detalhe.style.apply(style_st, axis=1), use_container_width=True)
+    # Só processa se houver uma seleção feita pelos botões acima
+    if foco_temporada:
+        st.info(f"Exibindo lista para: **{foco_temporada}** ({foco_status})")
+        
+        # --- CORREÇÃO AQUI ---
+        # Recriamos o 'universo' da loja/segmento usando df_global direto
+        # Isso IGNORA os filtros de Temporada/Mês da barra lateral, resolvendo o seu problema.
+        df_base_universo = df_global[
+            (df_global['Loja'].isin(lojas_selecionadas)) & 
+            (df_global['Segmento'].isin(segmentos_selecionados))
+        ].copy()
+
+        # Quem comprou na temporada FOCO (ex: T10)
+        df_foco_ativos = df_base_universo[df_base_universo['Temporada_Exibicao'] == foco_temporada]
+        set_ativos_foco = set(df_foco_ativos['CNPJ_CPF_LIMPO'].unique())
+
+        # Quem comprou em QUALQUER momento (Histórico da loja)
+        set_todos_clientes = set(df_base_universo['CNPJ_CPF_LIMPO'].unique())
+
+        # Diferença: Quem existe no histórico mas NÃO comprou na temporada foco
+        set_inativos_foco = set_todos_clientes.difference(set_ativos_foco)
+
+        df_detalhe = pd.DataFrame()
+
+        # Monta a tabela final baseada no status clicado
+        if foco_status == 'ativo':
+            # Se quer ver ATIVOS, mostramos dados da temporada foco
+            df_detalhe = df_foco_ativos.groupby([COLUNA_ESPECIFICADOR, 'CNPJ_CPF_LIMPO']).agg(
+                Qtd=(COLUNA_PEDIDO, 'nunique'), 
+                Data=('Data da Venda', 'max')
+            ).reset_index()
+            df_detalhe['Status'] = 'ATIVO'
+            
+        elif foco_status == 'inativo':
+            # Se quer ver INATIVOS, buscamos a última compra deles no histórico geral
+            df_inativos_historico = df_base_universo[df_base_universo['CNPJ_CPF_LIMPO'].isin(set_inativos_foco)]
+            
+            if not df_inativos_historico.empty:
+                df_detalhe = df_inativos_historico.groupby([COLUNA_ESPECIFICADOR, 'CNPJ_CPF_LIMPO']).agg(
+                    Data=('Data da Venda', 'max') # Última vez que comprou
+                ).reset_index()
+                df_detalhe['Qtd'] = 0 # Zera quantidade pois não compraram na temporada foco
+                df_detalhe['Status'] = 'INATIVO'
+
+        # Filtro de pesquisa textual (Input)
+        termo_atv = st.text_input("Pesquisar Detalhe:", value=st.session_state['filtro_status_ano']['termo_pesquisa'])
+        # Limpa o termo da sessão para não travar o input
+        if st.session_state['filtro_status_ano']['termo_pesquisa']:
+            st.session_state['filtro_status_ano']['termo_pesquisa'] = ''
+
+        if not df_detalhe.empty:
+            df_detalhe.sort_values(by=['Status', 'Qtd'], ascending=[False, False], inplace=True)
+            
+            if termo_atv:
+                t = termo_atv.lower()
+                df_detalhe = df_detalhe[
+                    df_detalhe[COLUNA_ESPECIFICADOR].astype(str).str.lower().str.contains(t) | 
+                    df_detalhe['Status'].astype(str).str.lower().str.contains(t)
+                ]
+
+            df_detalhe['Data'] = df_detalhe['Data'].apply(lambda x: x.strftime('%d/%m/%Y') if pd.notna(x) else '-')
+            
+            def style_st(row): return ['color: #00FF00' if row['Status']=='ATIVO' else 'color: #FF0000'] * len(row)
+            
+            st.dataframe(df_detalhe.style.apply(style_st, axis=1), use_container_width=True)
+        else:
+            st.warning("Nenhum registro encontrado para esta seleção.")
+    else:
+        st.info("Selecione uma linha na tabela acima e clique em um dos botões para ver os detalhes.")
 
     # =======================================================================
     # ITEM 10: RANKING
